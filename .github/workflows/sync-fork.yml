@@ -2,34 +2,58 @@ name: Sync Fork with Rebase
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Esegue ogni giorno a mezzanotte
-  workflow_dispatch: # Permette di eseguire manualmente il workflow
+    - cron: '0 0 * * *' # ogni giorno a mezzanotte
+  workflow_dispatch:
+
+env:
+  GH_PAT: ${{ secrets.EXTERNAL_REPO_PAT }}
+  DEFAULT_BRANCH: main
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
-      with:
-        fetch-depth: 0 # Necessario per il rebase
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
-    - name: Set up Git user
-      run: |
-        git config --global user.name "${{ secrets.GIT_USERNAME }}"
-        git config --global user.email "${{ secrets.GIT_EMAIL }}"
+      - name: Configure Git user
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-    - name: Add upstream repository
-      run: |
-        git remote add upstream https://github.com/mrcanelas/tmdb-addon.git
-        git fetch upstream
-        git rebase upstream/main
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Get upstream repository name dynamically
+        id: upstream
+        run: |
+          echo "📡 Recupero info sul repository..."
+          API_URL="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          
+          RESPONSE=$(curl -s -H "Authorization: token $GH_PAT" $API_URL)
+          PARENT_FULL_NAME=$(echo "$RESPONSE" | jq -r '.parent.full_name // empty')
 
-    - name: Push changes
-      run: |
-        git push --force-with-lease origin main
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          if [[ -z "$PARENT_FULL_NAME" ]]; then
+            echo "❌ Questa repository non è un fork oppure il token non ha accesso all'upstream."
+            exit 1
+          fi
+
+          echo "✅ Upstream rilevato: $PARENT_FULL_NAME"
+          echo "UPSTREAM_REPO=$PARENT_FULL_NAME" >> "$GITHUB_ENV"
+
+      - name: Sync with upstream
+        run: |
+          echo "🔄 Sincronizzazione con $UPSTREAM_REPO..."
+          UPSTREAM_URL="https://${GH_PAT}@github.com/${UPSTREAM_REPO}.git"
+          
+          git remote add upstream "$UPSTREAM_URL" || git remote set-url upstream "$UPSTREAM_URL"
+          git fetch upstream
+          git rebase upstream/${DEFAULT_BRANCH}
+
+      - name: Push changes to fork
+        run: |
+          echo "📤 Pushing aggiornamenti al fork..."
+          git push origin ${DEFAULT_BRANCH} --force-with-lease
