@@ -2,7 +2,7 @@ name: Sync Fork with Rebase
 
 on:
   schedule:
-    - cron: '0 0 * * *' # ogni giorno a mezzanotte
+    - cron: '0 0 * * *' # ogni giorno a mezzanotte (correggevo il cron)
   workflow_dispatch:
 
 env:
@@ -15,18 +15,19 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-
+    
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
+          token: ${{ secrets.EXTERNAL_REPO_PAT }}  # Usa il PAT invece del GITHUB_TOKEN
           fetch-depth: 0
-
+          
       - name: Configure Git user
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
+          
       - name: Get upstream repository name dynamically
         id: upstream
         run: |
@@ -35,15 +36,13 @@ jobs:
           
           RESPONSE=$(curl -s -H "Authorization: token $GH_PAT" $API_URL)
           PARENT_FULL_NAME=$(echo "$RESPONSE" | jq -r '.parent.full_name // empty')
-
           if [[ -z "$PARENT_FULL_NAME" ]]; then
             echo "❌ Questa repository non è un fork oppure il token non ha accesso all'upstream."
             exit 1
           fi
-
           echo "✅ Upstream rilevato: $PARENT_FULL_NAME"
           echo "UPSTREAM_REPO=$PARENT_FULL_NAME" >> "$GITHUB_ENV"
-
+          
       - name: Sync with upstream
         run: |
           echo "🔄 Sincronizzazione con $UPSTREAM_REPO..."
@@ -52,7 +51,7 @@ jobs:
           git remote add upstream "$UPSTREAM_URL" || git remote set-url upstream "$UPSTREAM_URL"
           git fetch upstream
           git rebase upstream/${DEFAULT_BRANCH}
-
+          
       - name: Push changes to fork
         run: |
           echo "📤 Pushing aggiornamenti al fork..."
